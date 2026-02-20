@@ -1,0 +1,31 @@
+# Composite action: Setup .NET SDKs
+# Equivalent to D:\sws\YAML\templates\steps\step_use_dotnet.yml
+# Installs .NET 8, 9 and 10 SDKs on the runner (multiple versions needed for code generation).
+
+name: Setup .NET SDKs
+description: >
+  Install the .NET SDK versions required by TIX builds (8.x for runtime compat,
+  9.x for code generation, 10.x as primary build SDK).
+  Equivalent to D:\sws\YAML\templates\steps\step_use_dotnet.yml
+
+runs:
+  using: composite
+  steps:
+    - name: Use .NET 8.x (runtime compatibility / code generation)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.x'
+
+    - name: Use .NET 9.x (code generation)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Use .NET 10.x (primary build SDK)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: dotnet --info
+      shell: pwsh
+      run: dotnet --info

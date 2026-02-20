@@ -1,0 +1,563 @@
+# Main reusable workflow for TIX builds.
+# Equivalent to D:\sws\YAML\templates\build.yml + templates\stages.yml
+#
+# IMPORTANT: Replace 'TIPS-ORG/gh_yaml' with your actual GitHub org/repo name
+#            in all composite action `uses:` references below.
+#
+# Usage from a consuming workflow:
+#   jobs:
+#     call-build:
+#       uses: TIPS-ORG/gh_yaml/.github/workflows/build.yml@main
+#       with:
+#         build-type: CI
+#         build-identifier: TixCore
+#         solution: common/netcore.slnx
+#       secrets: inherit
+#
+# Build-type mapping (ADO definition name → GHA workflow file):
+#   Branch  → netcore-branch.yml  (pull_request trigger)
+#   CI      → netcore-ci.yml      (push to develop/main)
+#   Nightly → netcore-nightly.yml (schedule trigger)
+#   Sprint  → netcore-sprint.yml  (push to sprint_g_*)
+
+name: TIX Build (reusable template)
+
+on:
+  workflow_call:
+    inputs:
+      build-type:
+        description: 'Build type: Branch | CI | Nightly | Sprint'
+        required: true
+        type: string
+      build-identifier:
+        description: 'Unique self-describing build identifier (e.g. TixCore)'
+        required: true
+        type: string
+      solution:
+        description: 'Relative path to the solution file from repo root'
+        required: true
+        type: string
+      runner:
+        description: 'Self-hosted runner label (equivalent to ADO pool name)'
+        required: false
+        type: string
+        default: 'TietoDocker-01'
+      sql-app-name:
+        description: 'Application name in SQL version history (M_VERSION). Empty = skip SQL job.'
+        required: false
+        type: string
+        default: ''
+      force-push-nugets:
+        description: 'Force NuGet publish on Branch/CI builds (equivalent to ADO ForcePushNugets)'
+        required: false
+        type: boolean
+        default: false
+      is-hotfix:
+        description: 'Hotfix build – affects Sprint version numbering'
+        required: false
+        type: boolean
+        default: false
+      run-sonar:
+        description: 'Run SonarQube analysis. When true tests run inline in the build job (Nightly pattern).'
+        required: false
+        type: boolean
+        default: false
+      publish-nuget-feed:
+        description: 'Azure Artifacts feed name to push packages to (e.g. TIX-CI). Empty = skip.'
+        required: false
+        type: string
+        default: ''
+      publish-nuget-on-first-attempt:
+        description: 'Publish NuGets without a manual approval gate (true for Nightly/Sprint).'
+        required: false
+        type: boolean
+        default: false
+      publish-gitops:
+        description: 'GitOps environment pattern to update (e.g. ci-*, nightly-*). Empty = skip.'
+        required: false
+        type: string
+        default: ''
+      tips-project-path-pattern:
+        description: 'Path pattern for TIPS projects to keep as project references (others replaced by NuGet)'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AZURE_DEVOPS_PAT:
+        required: true
+      ORACLE_INTEGRATION_TEST_CONNECTION_STRING:
+        required: false
+      MSSQL_INTEGRATION_TEST_CONNECTION_STRING:
+        required: false
+      MSSQL_INTEGRATION_TEST_PASSWORD:
+        required: false
+      SONAR_TOKEN:
+        required: false
+      GITHUB_PRIVATE_KEY:
+        required: false
+      GITHUB_APP_ID:
+        required: false
+      GITHUB_INSTALLATION_ID:
+        required: false
+
+env:
+  TIPS_YAML_BUILD: 'true'
+  TIX_ISOLATED: 'true'
+  TIX_YAML_BUILD: 'true'
+  NODE_OPTIONS: '--use-openssl-ca'
+  BUILD_CONFIGURATION: 'Release'
+  # On Windows self-hosted runners TixCompileNetFramework can be enabled if needed
+  DOTNET_COMMON_ARGS: '/p:TixCompileNetCore=true /p:TixCompileNetFramework=false'
+  DOTNET_PUBLISH_TFM: 'net8.0'
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # PREPARE – compute build/package version numbers and print debug info.
+  # Equivalent to ADO Prepare stage (stages.yml → job_prepare.yml + variables.yml)
+  # ADO uses counter() for monotonic patch numbers; GHA uses github.run_number
+  # which is unique per workflow and always increasing – functionally equivalent.
+  # ───────────────────────────────────────────────────────────────────────────
+  prepare:
+    name: Prepare
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      build-number:    ${{ steps.version.outputs.build-number }}
+      package-version: ${{ steps.version.outputs.package-version }}
+      safe-branch:     ${{ steps.version.outputs.safe-branch }}
+      sprint-number:   ${{ steps.version.outputs.sprint-number }}
+    steps:
+      - name: Compute version numbers
+        id: version
+        shell: pwsh
+        run: |
+          $buildType   = '${{ inputs.build-type }}'
+          $isHotfix    = '${{ inputs.is-hotfix }}' -eq 'true'
+          $runNumber   = ${{ github.run_number }}
+          $now         = [datetime]::UtcNow
+
+          # Safe branch: replace /, # with -, strip _ (mirrors ADO Tix.BuildSafeSourceBranchName)
+          $rawBranch   = '${{ github.head_ref || github.ref_name }}'
+          $safeBranch  = $rawBranch -replace '/', '-' -replace '#', '' -replace '_', '-'
+
+          switch ($buildType) {
+            'Branch' {
+              # Try to extract sprint number from PR target branch (sprint_g_NNN)
+              $sprintNumber   = '0'
+              $targetBranch   = '${{ github.base_ref }}'
+              if ($targetBranch -match 'sprint_g_(\d+)') { $sprintNumber = $Matches[1] }
+              $buildNumber    = "0.0.0-$safeBranch-$($runNumber.ToString('D2'))"
+              $packageVersion = "$safeBranch-$($runNumber.ToString('D2'))"
+            }
+            'CI' {
+              $buildNumber    = "1.0.0.$runNumber"
+              $packageVersion = "$($now.ToString('yyyy-MM-dd'))-$runNumber"
+              $sprintNumber   = '0'
+            }
+            'Nightly' {
+              $buildNumber    = "$($now.ToString('yyyy.MM.dd')).$runNumber"
+              $packageVersion = "$($now.ToString('yyyy-MM-dd'))-$runNumber"
+              $sprintNumber   = '0'
+            }
+            'Sprint' {
+              $branch         = '${{ github.ref_name }}'
+              $sprintNumber   = ($branch -replace 'sprint_g_', '') -replace '_htfx', ''
+              $prefix         = if ($isHotfix) { "1.0.$sprintNumber-HTFX" } else { "1.0.$sprintNumber" }
+              $buildNumber    = "$prefix.$runNumber"
+              $packageVersion = "$prefix.$runNumber"
+            }
+            default {
+              Write-Error "Unknown build-type '$buildType'. Must be Branch, CI, Nightly or Sprint."
+              exit 1
+            }
+          }
+
+          Write-Host "BuildType:       $buildType"
+          Write-Host "BuildIdentifier: ${{ inputs.build-identifier }}"
+          Write-Host "Solution:        ${{ inputs.solution }}"
+          Write-Host "BuildNumber:     $buildNumber"
+          Write-Host "PackageVersion:  $packageVersion"
+          Write-Host "SafeBranch:      $safeBranch"
+          Write-Host "SprintNumber:    $sprintNumber"
+          Write-Host "IsHotfix:        $isHotfix"
+          Write-Host "RunNumber:       $runNumber"
+          Write-Host "Runner:          ${{ inputs.runner }}"
+
+          "build-number=$buildNumber"       >> $env:GITHUB_OUTPUT
+          "package-version=$packageVersion" >> $env:GITHUB_OUTPUT
+          "safe-branch=$safeBranch"         >> $env:GITHUB_OUTPUT
+          "sprint-number=$sprintNumber"     >> $env:GITHUB_OUTPUT
+
+      - name: Set run display name
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $buildNumber = '${{ steps.version.outputs.build-number }}'
+          Write-Host "Build: ${{ inputs.build-identifier }} $buildNumber (${{ inputs.build-type }})"
+          # GitHub doesn't support renaming runs via API; annotate via summary instead
+          "## Build: ${{ inputs.build-identifier }} ``$buildNumber``" >> $env:GITHUB_STEP_SUMMARY
+          "| | |" >> $env:GITHUB_STEP_SUMMARY
+          "|---|---|" >> $env:GITHUB_STEP_SUMMARY
+          "| Build type | ${{ inputs.build-type }} |" >> $env:GITHUB_STEP_SUMMARY
+          "| Solution   | ${{ inputs.solution }} |" >> $env:GITHUB_STEP_SUMMARY
+          "| Package version | ${{ steps.version.outputs.package-version }} |" >> $env:GITHUB_STEP_SUMMARY
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # BUILD – restore, build, pack, publish, upload artifacts.
+  # Equivalent to ADO Build stage (stages.yml → job_build.yml)
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ${{ inputs.runner }}
+    needs: [prepare]
+    env:
+      ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+      PACKAGE_VERSION:   ${{ needs.prepare.outputs.package-version }}
+      SOLUTION_PATH:     ${{ inputs.solution }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          # Fetch tags when Sonar is active (needed for version detection)
+          fetch-tags: ${{ inputs.run-sonar }}
+
+      - name: Setup .NET SDKs
+        uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
+
+      - name: Print environment
+        shell: pwsh
+        run: Get-ChildItem Env: | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
+
+      - name: Authenticate NuGet sources
+        uses: TIPS-ORG/gh_yaml/actions/dotnet-restore@main
+        with:
+          solution:          ${{ inputs.solution }}
+          azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
+          artifact-base-dir: ${{ github.workspace }}/artifacts
+          auth-only:         'true'
+
+      - name: dotnet restore
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:ARTIFACT_BASE_DIR/binlog" | Out-Null
+          dotnet restore "$env:SOLUTION_PATH" `
+            --no-http-cache `
+            --configfile "nuget.config" `
+            --verbosity minimal `
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/restore.binlog" `
+            $env:DOTNET_COMMON_ARGS
+
+      - name: dotnet build
+        shell: pwsh
+        run: |
+          dotnet build "$env:SOLUTION_PATH" `
+            --no-restore `
+            --configuration $env:BUILD_CONFIGURATION `
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/build.binlog" `
+            $env:DOTNET_COMMON_ARGS
+
+      - name: dotnet pack
+        shell: pwsh
+        run: |
+          dotnet pack "$env:SOLUTION_PATH" `
+            --no-restore --no-build `
+            --configuration $env:BUILD_CONFIGURATION `
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/pack.binlog" `
+            "/p:PackageVersion=$env:PACKAGE_VERSION" `
+            $env:DOTNET_COMMON_ARGS `
+            /p:ContinuousIntegrationBuild=true `
+            /p:WarnOnPackingNonPackableProject=false `
+            /p:NoWarn=NU5048
+
+      - name: dotnet publish
+        shell: pwsh
+        run: |
+          dotnet publish "$env:SOLUTION_PATH" `
+            --no-restore --no-build `
+            --configuration $env:BUILD_CONFIGURATION `
+            --framework $env:DOTNET_PUBLISH_TFM `
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish.binlog" `
+            $env:DOTNET_COMMON_ARGS
+
+      # When Sonar is enabled tests run inline here – same as ADO Nightly pattern
+      - name: Run tests inline (Sonar mode)
+        if: ${{ inputs.run-sonar }}
+        uses: TIPS-ORG/gh_yaml/actions/run-test@main
+        with:
+          solution:                  ${{ inputs.solution }}
+          test-category:             all
+          artifact-base-dir:         ${{ github.workspace }}/artifacts
+          oracle-connection-string:  ${{ secrets.ORACLE_INTEGRATION_TEST_CONNECTION_STRING }}
+          mssql-connection-string:   ${{ secrets.MSSQL_INTEGRATION_TEST_CONNECTION_STRING }}
+          mssql-password:            ${{ secrets.MSSQL_INTEGRATION_TEST_PASSWORD }}
+          run-id:                    ${{ github.run_id }}
+
+      - name: Upload binlog
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binlog
+          path: ${{ github.workspace }}/artifacts/binlog
+          if-no-files-found: ignore
+
+      - name: Upload Apps
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apps
+          path: ${{ github.workspace }}/artifacts/publish
+          if-no-files-found: ignore
+
+      - name: Upload Packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: Packages
+          path: ${{ github.workspace }}/artifacts/package
+          if-no-files-found: ignore
+
+      # Test binaries uploaded per category so test jobs can download and run --no-build
+      - name: Upload Tests_unit binaries
+        if: ${{ !inputs.run-sonar }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tests_unit
+          path: ${{ github.workspace }}/artifacts/tests/unit/bin
+          if-no-files-found: ignore
+
+      - name: Upload Tests_integration binaries
+        if: ${{ !inputs.run-sonar }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tests_integration
+          path: ${{ github.workspace }}/artifacts/tests/integration/bin
+          if-no-files-found: ignore
+
+      - name: Upload Tests_mssql binaries
+        if: ${{ !inputs.run-sonar }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tests_mssql
+          path: ${{ github.workspace }}/artifacts/tests/mssql/bin
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # UNIT TEST – equivalent to ADO UnitTest stage (job_test.yml, category=unit)
+  # Skipped when run-sonar=true (tests already ran inline in the build job).
+  # ───────────────────────────────────────────────────────────────────────────
+  unit-test:
+    name: Unit Tests
+    runs-on: ${{ inputs.runner }}
+    needs: [build]
+    if: ${{ !inputs.run-sonar }}
+    env:
+      ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET SDKs
+        uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
+
+      - name: Authenticate NuGet sources
+        uses: TIPS-ORG/gh_yaml/actions/dotnet-restore@main
+        with:
+          solution:          ${{ inputs.solution }}
+          azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
+          artifact-base-dir: ${{ github.workspace }}/artifacts
+          auth-only:         'true'
+
+      - name: Download Tests_unit artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Tests_unit
+          path: ${{ github.workspace }}/artifacts/tests/unit/bin
+
+      - name: Run unit tests
+        uses: TIPS-ORG/gh_yaml/actions/run-test@main
+        with:
+          solution:          ${{ inputs.solution }}
+          test-category:     unit
+          artifact-base-dir: ${{ github.workspace }}/artifacts
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # INTEGRATION TEST – equivalent to ADO IntegrationTest stage (category=integration)
+  # ───────────────────────────────────────────────────────────────────────────
+  integration-test:
+    name: Integration Tests
+    runs-on: ${{ inputs.runner }}
+    needs: [build]
+    if: ${{ !inputs.run-sonar }}
+    env:
+      ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET SDKs
+        uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
+
+      - name: Authenticate NuGet sources
+        uses: TIPS-ORG/gh_yaml/actions/dotnet-restore@main
+        with:
+          solution:          ${{ inputs.solution }}
+          azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
+          artifact-base-dir: ${{ github.workspace }}/artifacts
+          auth-only:         'true'
+
+      - name: Download Tests_integration artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Tests_integration
+          path: ${{ github.workspace }}/artifacts/tests/integration/bin
+
+      - name: Run integration tests
+        uses: TIPS-ORG/gh_yaml/actions/run-test@main
+        with:
+          solution:                  ${{ inputs.solution }}
+          test-category:             integration
+          artifact-base-dir:         ${{ github.workspace }}/artifacts
+          oracle-connection-string:  ${{ secrets.ORACLE_INTEGRATION_TEST_CONNECTION_STRING }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # MSSQL TEST – equivalent to ADO MsSqlTest stage (category=mssql)
+  # ───────────────────────────────────────────────────────────────────────────
+  mssql-test:
+    name: MS SQL Tests
+    runs-on: ${{ inputs.runner }}
+    needs: [build]
+    if: ${{ !inputs.run-sonar }}
+    env:
+      ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET SDKs
+        uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
+
+      - name: Authenticate NuGet sources
+        uses: TIPS-ORG/gh_yaml/actions/dotnet-restore@main
+        with:
+          solution:          ${{ inputs.solution }}
+          azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
+          artifact-base-dir: ${{ github.workspace }}/artifacts
+          auth-only:         'true'
+
+      - name: Download Tests_mssql artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Tests_mssql
+          path: ${{ github.workspace }}/artifacts/tests/mssql/bin
+
+      - name: Run MS SQL tests
+        uses: TIPS-ORG/gh_yaml/actions/run-test@main
+        with:
+          solution:                 ${{ inputs.solution }}
+          test-category:            mssql
+          artifact-base-dir:        ${{ github.workspace }}/artifacts
+          mssql-connection-string:  ${{ secrets.MSSQL_INTEGRATION_TEST_CONNECTION_STRING }}
+          mssql-password:           ${{ secrets.MSSQL_INTEGRATION_TEST_PASSWORD }}
+          run-id:                   ${{ github.run_id }}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PUBLISH NUGET – equivalent to ADO PublishToNugetFeed stage (stage_publish_nuget.yml)
+  # The ADO manual gate (agentless TriggerNuGet job) maps to a GitHub environment
+  # protection rule named 'nuget-gate' (configure in repo Settings → Environments).
+  # Set publish-nuget-on-first-attempt: true to bypass it (Nightly/Sprint).
+  # Skipped job (run-sonar=true) counts as success, so this job still runs.
+  # ───────────────────────────────────────────────────────────────────────────
+  publish-nuget:
+    name: Publish NuGet → ${{ inputs.publish-nuget-feed }}
+    runs-on: ${{ inputs.runner }}
+    needs: [build, unit-test, integration-test, mssql-test]
+    if: ${{ inputs.publish-nuget-feed != '' && !failure() && !cancelled() }}
+    # environment protection rule acts as the manual gate; omit when publishing immediately
+    environment: ${{ inputs.publish-nuget-on-first-attempt == false && 'nuget-gate' || '' }}
+    env:
+      ARTIFACT_BASE_DIR: ${{ github.workspace }}/nugetdownload
+      FEED_URL: https://pkgs.dev.azure.com/tieto-pe/_packaging/${{ inputs.publish-nuget-feed }}/nuget/v3/index.json
+    steps:
+      - name: Download Packages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Packages
+          path: ${{ github.workspace }}/nugetdownload/artifacts/package
+
+      - name: List packages to publish
+        shell: pwsh
+        run: Get-ChildItem -Recurse "$env:ARTIFACT_BASE_DIR" -Filter '*.nupkg' | ForEach-Object { $_.FullName }
+
+      - name: Setup .NET SDKs
+        uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
+
+      - name: Push packages to ${{ inputs.publish-nuget-feed }}
+        shell: pwsh
+        env:
+          VSS_NUGET_EXTERNAL_FEED_ENDPOINTS: >-
+            {"endpointCredentials":[{"endpoint":"${{ env.FEED_URL }}","username":"az","password":"${{ secrets.AZURE_DEVOPS_PAT }}"}]}
+        run: |
+          dotnet nuget push "$env:ARTIFACT_BASE_DIR/artifacts/package/release/*.nupkg" `
+            --source "$env:FEED_URL" `
+            --api-key az `
+            --skip-duplicate
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # UPDATE GITOPS – equivalent to ADO UpdateGitOps stage (job_publish_gitops.yml)
+  # Requires GITHUB_PRIVATE_KEY, GITHUB_APP_ID, GITHUB_INSTALLATION_ID secrets.
+  # Also requires porting YAML/scripts/ReplaceImageTags.ps1 to gh_yaml/scripts/.
+  # ───────────────────────────────────────────────────────────────────────────
+  publish-gitops:
+    name: Update GitOps (${{ inputs.publish-gitops }})
+    runs-on: ${{ inputs.runner }}
+    needs: [build, unit-test, integration-test, mssql-test]
+    if: ${{ inputs.publish-gitops != '' && !failure() && !cancelled() }}
+    env:
+      GITOPS_DIR: ${{ github.workspace }}/GITOPS
+    steps:
+      - name: Install powershell-jwt
+        shell: pwsh
+        run: Install-Module -Scope CurrentUser -Name powershell-jwt -Confirm:$false -Force
+
+      - name: Clone TIPSCORE-Gitops
+        shell: pwsh
+        env:
+          GITHUB_PRIVATE_KEY:     ${{ secrets.GITHUB_PRIVATE_KEY }}
+          GITHUB_APP_ID:          ${{ secrets.GITHUB_APP_ID }}
+          GITHUB_INSTALLATION_ID: ${{ secrets.GITHUB_INSTALLATION_ID }}
+        run: |
+          $apiPemData = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:GITHUB_PRIVATE_KEY))
+          $apiSecret  = [System.Text.Encoding]::UTF8.GetBytes($apiPemData)
+          $exp = [int][double]::Parse((Get-Date (Get-Date).ToUniversalTime().AddSeconds(300) -UFormat %s))
+          $iat = [int][double]::Parse((Get-Date (Get-Date).ToUniversalTime() -UFormat %s))
+          $jwt = New-JWT -Algorithm RS256 -Issuer $env:GITHUB_APP_ID -ExpiryTimestamp $exp `
+                         -SecretKey $apiSecret -PayloadClaims @{ iat = $iat }
+          $headers = @{ Accept = 'application/vnd.github+json'; Authorization = "Bearer $jwt" }
+          $res     = Invoke-WebRequest `
+                       -Uri "https://api.github.com/app/installations/$env:GITHUB_INSTALLATION_ID/access_tokens" `
+                       -Headers $headers -Method Post
+          $token   = (ConvertFrom-Json $res.Content).token
+          git clone "https://x-access-token:$token@github.com/te-industry-ppf/TIPSCORE-Gitops.git" "$env:GITOPS_DIR"
+
+      - name: Download tipsregistry artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tipsregistry
+          path: ${{ github.workspace }}/artifacts/tipsregistry
+
+      - name: Replace image tags in GitOps
+        shell: pwsh
+        run: |
+          # TODO: copy YAML/scripts/ReplaceImageTags.ps1 to gh_yaml/scripts/ then invoke:
+          # & (Join-Path $env:GITHUB_ACTION_PATH '../../scripts/ReplaceImageTags.ps1') `
+          #     -ImageFilePath "artifacts/tipsregistry/ImageVersions_tipsregistry.md" `
+          #     -GitOpsDirectory "$env:GITOPS_DIR" `
+          #     -GitOpsEnvironment "${{ inputs.publish-gitops }}" `
+          #     -commit $true
+          Write-Host "Updating GitOps for environment pattern: ${{ inputs.publish-gitops }}"
+          Write-Host "GitOps directory: $env:GITOPS_DIR"

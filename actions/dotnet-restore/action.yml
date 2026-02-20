@@ -1,0 +1,53 @@
+# Composite action: Authenticate NuGet sources and optionally restore packages.
+# Equivalent to D:\sws\YAML\templates\steps\step_dotnet_restore.yml
+#
+# Authentication uses `dotnet nuget update source` with a PAT (mirrors ADO
+# behaviour where System.AccessToken is injected). The nuget.config in the repo
+# must already contain a source named "TIPS" pointing at the Azure Artifacts feed.
+
+name: Authenticate NuGet and restore
+description: >
+  Update Azure Artifacts NuGet sources in nuget.config with the supplied PAT,
+  then optionally run dotnet restore.
+  Equivalent to D:\sws\YAML\templates\steps\step_dotnet_restore.yml
+
+inputs:
+  solution:
+    description: 'Relative path to the solution file from repo root'
+    required: true
+  azure-devops-pat:
+    description: 'Azure DevOps PAT used to authenticate Azure Artifacts feeds'
+    required: true
+  artifact-base-dir:
+    description: 'Base directory for build artifacts (binlog written here)'
+    required: true
+  auth-only:
+    description: 'When "true" only authenticate the feed; skip dotnet restore'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    # Mirror of ADO: dotnet nuget update source "TIPS" --configfile nuget.config -u anonymous -p $(System.AccessToken)
+    - name: Authenticate TIPS NuGet source
+      shell: pwsh
+      env:
+        AZURE_DEVOPS_PAT: ${{ inputs.azure-devops-pat }}
+      run: |
+        dotnet nuget update source "TIPS" `
+          --configfile "nuget.config" `
+          --username az `
+          --password "$env:AZURE_DEVOPS_PAT" `
+          --store-password-in-clear-text
+
+    - name: dotnet restore
+      if: ${{ inputs.auth-only != 'true' }}
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "${{ inputs.artifact-base-dir }}/binlog" | Out-Null
+        dotnet restore "${{ inputs.solution }}" `
+          --no-http-cache `
+          --configfile "nuget.config" `
+          --verbosity minimal `
+          "-bl:${{ inputs.artifact-base-dir }}/binlog/restore.binlog"

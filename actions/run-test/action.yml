@@ -1,0 +1,117 @@
+# Composite action: Run dotnet tests for a given category, collect coverage,
+# and upload results as artifacts.
+# Equivalent to D:\sws\YAML\templates\steps\step_run_test.yml
+#
+# The test category is passed as an MSBuild property (/p:testcategory=) and also
+# used to find the pre-built test binaries (artifacts/tests/{category}/bin).
+# Test results (.trx) are uploaded as artifacts; use a third-party action such as
+# dorny/test-reporter if you want inline PR annotations.
+
+name: Run dotnet tests
+description: >
+  Run dotnet test for a given category with code coverage collection.
+  Uploads .trx results and crash dumps as GitHub artifacts.
+  Equivalent to D:\sws\YAML\templates\steps\step_run_test.yml
+
+inputs:
+  solution:
+    description: 'Relative path to the solution file from repo root'
+    required: true
+  test-category:
+    description: 'Test category: unit | integration | mssql | all'
+    required: true
+  artifact-base-dir:
+    description: 'Base directory where test results and crash dumps are written'
+    required: true
+  oracle-connection-string:
+    description: 'Oracle connection string (integration tests)'
+    required: false
+    default: ''
+  mssql-connection-string:
+    description: 'MS SQL connection string template (mssql tests)'
+    required: false
+    default: ''
+  mssql-password:
+    description: 'MS SQL password (mssql tests)'
+    required: false
+    default: ''
+  run-id:
+    description: 'GitHub run ID used as TIX_MSSQLTEST_DISCRIMINATOR'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: dotnet test (${{ inputs.test-category }})
+      shell: pwsh
+      # Environment variables mirror ADO step_run_test.yml per-category logic
+      env:
+        # Integration test connection (only set when test-category == integration)
+        TIX_SelectedConnectionString:         ${{ inputs.test-category == 'integration' && 'BUILD_ORACLE_INTEGRATION_TEST' || '' }}
+        TIXCONN_BUILD_ORACLE_INTEGRATION_TEST: ${{ inputs.oracle-connection-string }}
+        TIXPROV_BUILD_ORACLE_INTEGRATION_TEST: ${{ inputs.test-category == 'integration' && 'Oracle.ManagedDataAccess.Client' || '' }}
+        # MS SQL test connection (only set when test-category == mssql)
+        TIX_MSSQLTEST_TEMPLATE:      ${{ inputs.mssql-connection-string }}
+        TIX_MSSQLTEST_DISCRIMINATOR: ${{ inputs.run-id }}
+        TIX_MSSQLTEST_PASSWORD:      ${{ inputs.mssql-password }}
+      run: |
+        $category   = '${{ inputs.test-category }}'
+        $resultsDir = Join-Path '${{ inputs.artifact-base-dir }}' "testresults/$category"
+        New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
+
+        # Build the category filter argument; 'all' means no filter (Sonar/Nightly inline run)
+        $filterArg = if ($category -ne 'all') { "--filter ""testcategory=$category""" } else { '' }
+
+        $args = @(
+          "test", "`"${{ inputs.solution }}`"",
+          "--no-restore", "--no-build",
+          "--configuration", "Release",
+          "--framework", "net8.0",
+          "--collect", "`"Code Coverage`"",
+          "--nologo",
+          "--blame-crash",
+          "--logger", "trx",
+          "--results-directory", "`"$resultsDir`""
+        )
+        if ($filterArg) { $args += $filterArg }
+
+        Write-Host "dotnet $($args -join ' ')"
+        & dotnet @args
+        # Do not propagate test failures as step failure; let the publish step decide
+        # (mirrors ADO continueOnError: true on the test task)
+        exit 0
+
+    - name: Upload test results (${{ inputs.test-category }})
+      # Always upload so failures are visible even when tests crash
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: TestResults_${{ inputs.test-category }}
+        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}
+        if-no-files-found: ignore
+
+    - name: Collect crash dumps
+      if: always()
+      shell: pwsh
+      run: |
+        $dumps = Get-ChildItem -Path "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}" `
+                               -Filter '*.dmp' -Recurse -ErrorAction SilentlyContinue
+        if ($dumps.Count -gt 0) {
+          $dest = "${{ inputs.artifact-base-dir }}/crashdumps/${{ inputs.test-category }}"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $dumps | ForEach-Object {
+            Write-Host "Copying dump: $($_.FullName)"
+            Copy-Item $_.FullName -Destination $dest -Force
+          }
+        } else {
+          Write-Host "No crash dumps found."
+        }
+
+    - name: Upload crash dumps (${{ inputs.test-category }})
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: crashdumps_${{ inputs.test-category }}
+        path: ${{ inputs.artifact-base-dir }}/crashdumps/${{ inputs.test-category }}
+        if-no-files-found: ignore
