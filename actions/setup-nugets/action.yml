@@ -1,0 +1,52 @@
+# Composite action: Setup NuGet feeds and resolve shared package versions.
+# Equivalent to D:\sws\YAML\templates\steps\step_setup_nugets.yml
+#
+# Calls GetNugetPackageVersions.ps1 to query Azure Artifacts feeds and write
+# resolved versions to GITHUB_ENV so downstream dotnet commands pick them up.
+# Optionally calls ReplaceProjectReferences.ps1 when tips-project-path-pattern is set.
+
+name: Setup NuGet feeds and resolve package versions
+description: >
+  Configure Azure Artifacts NuGet sources per build type and resolve shared
+  package versions from Tix.Dependencies.props.
+  Equivalent to D:\sws\YAML\templates\steps\step_setup_nugets.yml
+
+inputs:
+  build-type:
+    description: 'Build type: Branch | CI | Nightly | Sprint'
+    required: true
+  safe-branch:
+    description: 'URL-safe branch name (from prepare job output)'
+    required: false
+    default: ''
+  azure-devops-pat:
+    description: 'Azure DevOps PAT for authenticating Azure Artifacts feeds'
+    required: true
+  tips-project-path-pattern:
+    description: 'Regex pattern for projects to keep as project references. Others become NuGet refs.'
+    required: false
+    default: ''
+  solution:
+    description: 'Relative path to the solution file (needed when tips-project-path-pattern is set)'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve shared package versions
+      shell: pwsh
+      env:
+        AZURE_DEVOPS_PAT: ${{ inputs.azure-devops-pat }}
+      run: |
+        & "${{ github.action_path }}/../../scripts/GetNugetPackageVersions.ps1" `
+            -BuildType                 "${{ inputs.build-type }}" `
+            -BuildSafeSourceBranchName "${{ inputs.safe-branch }}"
+
+    - name: Replace project references with NuGet references
+      if: ${{ inputs.tips-project-path-pattern != '' }}
+      shell: pwsh
+      run: |
+        & "${{ github.action_path }}/../../scripts/ReplaceProjectReferences.ps1" `
+            -Solution    "${{ inputs.solution }}" `
+            -PathPattern "${{ inputs.tips-project-path-pattern }}"

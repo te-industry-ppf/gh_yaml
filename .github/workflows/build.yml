@@ -214,13 +214,40 @@ jobs:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
       PACKAGE_VERSION:   ${{ needs.prepare.outputs.package-version }}
       SOLUTION_PATH:     ${{ inputs.solution }}
+      SAFE_BRANCH:       ${{ needs.prepare.outputs.safe-branch }}
     steps:
+      - name: Verify build attempt
+        # Re-running individual jobs is not supported; trigger a new run instead.
+        # Mirrors YAML/scripts/VerifyBuildAttempt.ps1
+        if: ${{ github.run_attempt > 1 }}
+        shell: pwsh
+        run: |
+          Write-Host "::error::Re-running the build job is not supported. Please trigger a new build instead."
+          exit 1
+
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
           # Fetch tags when Sonar is active (needed for version detection)
           fetch-tags: ${{ inputs.run-sonar }}
+
+      - name: Checkout gh_yaml scripts
+        uses: actions/checkout@v4
+        with:
+          repository: TIPS-ORG/gh_yaml
+          ref: main
+          path: .gh_yaml
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup build variables
+        # Reads Directory.Build.props to override DOTNET_PUBLISH_TFM / DOTNET_TEST_TFM
+        # and compute CONTAINER_IMAGE_VERSION. Mirrors YAML/scripts/SetupBuildVariables.ps1.
+        shell: pwsh
+        run: |
+          & "./.gh_yaml/scripts/SetupBuildVariables.ps1" `
+              -SolutionPath "$env:SOLUTION_PATH" `
+              -BuildType    "${{ inputs.build-type }}"
 
       - name: Setup .NET SDKs
         uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
@@ -236,6 +263,25 @@ jobs:
           azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
           artifact-base-dir: ${{ github.workspace }}/artifacts
           auth-only:         'true'
+
+      - name: Setup NuGet feeds and resolve shared package versions
+        uses: TIPS-ORG/gh_yaml/actions/setup-nugets@main
+        with:
+          build-type:                ${{ inputs.build-type }}
+          safe-branch:               ${{ needs.prepare.outputs.safe-branch }}
+          azure-devops-pat:          ${{ secrets.AZURE_DEVOPS_PAT }}
+          tips-project-path-pattern: ${{ inputs.tips-project-path-pattern }}
+          solution:                  ${{ inputs.solution }}
+
+      - name: SonarQube begin
+        if: ${{ inputs.run-sonar }}
+        uses: TIPS-ORG/gh_yaml/actions/sonar-prepare@main
+        with:
+          build-identifier: ${{ inputs.build-identifier }}
+          sonar-host-url:   ${{ secrets.SONAR_HOST_URL }}
+          sonar-token:      ${{ secrets.SONAR_TOKEN }}
+          branch-name:      ${{ github.ref_name }}
+          sources-directory: ${{ github.workspace }}
 
       - name: dotnet restore
         shell: pwsh
@@ -256,6 +302,13 @@ jobs:
             --configuration $env:BUILD_CONFIGURATION `
             "-bl:$env:ARTIFACT_BASE_DIR/binlog/build.binlog" `
             $env:DOTNET_COMMON_ARGS
+
+      - name: Check for build warnings
+        # Mirror ADO MarkBuildAsWarning.ps1: annotate and flag warnings found during build
+        shell: pwsh
+        run: |
+          & "./.gh_yaml/scripts/MarkBuildAsWarning.ps1" `
+              -BinlogPath "$env:ARTIFACT_BASE_DIR/binlog/build.binlog"
 
       - name: dotnet pack
         shell: pwsh
@@ -292,6 +345,15 @@ jobs:
           mssql-connection-string:   ${{ secrets.MSSQL_INTEGRATION_TEST_CONNECTION_STRING }}
           mssql-password:            ${{ secrets.MSSQL_INTEGRATION_TEST_PASSWORD }}
           run-id:                    ${{ github.run_id }}
+
+      - name: SonarQube finish
+        if: ${{ inputs.run-sonar }}
+        uses: TIPS-ORG/gh_yaml/actions/sonar-finish@main
+        with:
+          sonar-token:    ${{ secrets.SONAR_TOKEN }}
+          sonar-host-url: ${{ secrets.SONAR_HOST_URL }}
+          coverage-input-glob:  ${{ github.workspace }}/artifacts/testresults/**/*.coverage
+          coverage-output-xml:  ${{ runner.temp }}/sonar_coverage.xml
 
       - name: Upload binlog
         if: always()
@@ -524,6 +586,14 @@ jobs:
         shell: pwsh
         run: Install-Module -Scope CurrentUser -Name powershell-jwt -Confirm:$false -Force
 
+      - name: Checkout gh_yaml scripts
+        uses: actions/checkout@v4
+        with:
+          repository: TIPS-ORG/gh_yaml
+          ref: main
+          path: .gh_yaml
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Clone TIPSCORE-Gitops
         shell: pwsh
         env:
@@ -553,11 +623,8 @@ jobs:
       - name: Replace image tags in GitOps
         shell: pwsh
         run: |
-          # TODO: copy YAML/scripts/ReplaceImageTags.ps1 to gh_yaml/scripts/ then invoke:
-          # & (Join-Path $env:GITHUB_ACTION_PATH '../../scripts/ReplaceImageTags.ps1') `
-          #     -ImageFilePath "artifacts/tipsregistry/ImageVersions_tipsregistry.md" `
-          #     -GitOpsDirectory "$env:GITOPS_DIR" `
-          #     -GitOpsEnvironment "${{ inputs.publish-gitops }}" `
-          #     -commit $true
-          Write-Host "Updating GitOps for environment pattern: ${{ inputs.publish-gitops }}"
-          Write-Host "GitOps directory: $env:GITOPS_DIR"
+          & "./.gh_yaml/scripts/ReplaceImageTags.ps1" `
+              -ImageFilePath    "artifacts/tipsregistry/ImageVersions_tipsregistry.md" `
+              -GitOpsDirectory  "$env:GITOPS_DIR" `
+              -GitOpsEnvironment "${{ inputs.publish-gitops }}" `
+              -commit           $true

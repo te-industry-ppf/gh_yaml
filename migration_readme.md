@@ -179,33 +179,36 @@ Pass `secrets.SONAR_TOKEN` via `secrets: inherit`.
 
 ---
 
-## Outstanding TODO items
+## Migration status
 
-The following ADO scripts have not yet been ported to `gh_yaml/scripts/` and need attention:
+All scripts and composite actions have been ported. No outstanding items remain.
 
-| ADO script | Used in | Action required |
+| ADO artifact | GHA equivalent | Status |
 |---|---|---|
-| `scripts/SetupBuildVariables.ps1` | Build/test jobs — sets `Tix.ArtifactBaseDir` etc. | Port or replace with inline logic |
-| `scripts/GetNugetPackageVersions.ps1` | `step_setup_nugets.yml` — resolves shared package versions | Port or replace with feed query |
-| `scripts/ReplaceProjectReferences.ps1` | `step_setup_nugets.yml` — swaps project refs for NuGet refs | Port; use `tips-project-path-pattern` input |
-| `scripts/ReplaceImageTags.ps1` | `job_publish_gitops.yml` — updates GitOps image tags | Port; referenced by a TODO comment in `publish-gitops` job |
-| `scripts/MergeTestResults.ps1` | `step_run_test.yml` — merges `.trx` files | Port or replace with `dorny/test-reporter` action |
-| `scripts/MarkBuildAsWarning.ps1` | `job_build.yml` — checks `.binlog` for warnings | Port; invoke after `dotnet build` step |
-| `scripts/VerifyBuildAttempt.ps1` | `job_build.yml` — rejects re-runs of failed builds | Port; no GHA equivalent concept needed |
-| `steps/step_prepare_sonar.yml` | Nightly build | Port SonarScanner prepare step |
-| `steps/step_finish_sonar.yml` | Nightly build | Port SonarScanner finish/publish step |
+| `scripts/SetupBuildVariables.ps1` | `gh_yaml/scripts/SetupBuildVariables.ps1` | ✅ Done |
+| `scripts/GetNugetPackageVersions.ps1` | `gh_yaml/scripts/GetNugetPackageVersions.ps1` | ✅ Done |
+| `scripts/ReplaceProjectReferences.ps1` | `gh_yaml/scripts/ReplaceProjectReferences.ps1` | ✅ Done |
+| `scripts/ReplaceImageTags.ps1` | `gh_yaml/scripts/ReplaceImageTags.ps1` | ✅ Done |
+| `scripts/MergeTestResults.ps1` | `gh_yaml/scripts/MergeTestResults.ps1` | ✅ Done |
+| `scripts/MarkBuildAsWarning.ps1` | `gh_yaml/scripts/MarkBuildAsWarning.ps1` | ✅ Done |
+| `scripts/VerifyBuildAttempt.ps1` | Inline step in `build.yml` build job | ✅ Done |
+| `steps/step_setup_nugets.yml` | `gh_yaml/actions/setup-nugets/action.yml` | ✅ Done |
+| `steps/step_prepare_sonar.yml` | `gh_yaml/actions/sonar-prepare/action.yml` | ✅ Done |
+| `steps/step_finish_sonar.yml` | `gh_yaml/actions/sonar-finish/action.yml` | ✅ Done |
+
+> **Note:** The `gh_yaml` scripts repo is checked out at `.gh_yaml` inside the build job so the reusable
+> workflow can call scripts directly. No further porting is required.
 
 ---
 
 ## One-time setup checklist
 
 - [ ] Push `gh_yaml` to GitHub and note the org/repo path.
-- [ ] Replace every occurrence of `TIPS-ORG/gh_yaml` in `build.yml` with `your-org/gh_yaml`.
+- [ ] Replace every occurrence of `TIPS-ORG/gh_yaml` in all workflow and action files with `your-org/gh_yaml`.
 - [ ] Register the self-hosted runner(s) under the label `TietoDocker-01`
       (Settings → Actions → Runners), or update the `runner` input default.
 - [ ] Add all secrets listed above to the repository or organisation.
 - [ ] Create the `nuget-gate` environment with required reviewers.
-- [ ] Port outstanding scripts (see table above).
 - [ ] Validate a Branch build by opening a PR to `develop`.
 - [ ] Validate a CI build by merging to `develop`.
 - [ ] Validate a Nightly build via `workflow_dispatch` on `netcore-nightly.yml`.

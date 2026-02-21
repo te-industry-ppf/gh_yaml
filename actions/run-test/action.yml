@@ -82,13 +82,24 @@ runs:
         # (mirrors ADO continueOnError: true on the test task)
         exit 0
 
+    - name: Merge test results (${{ inputs.test-category }})
+      # Mirrors YAML/scripts/MergeTestResults.ps1: combines per-assembly .trx files
+      # into one merged .trx and sets SkipTestPublish output if no results found.
+      id: merge-results
+      if: always()
+      shell: pwsh
+      run: |
+        & "${{ github.action_path }}/../../scripts/MergeTestResults.ps1" `
+            -TempDirectory "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}" `
+            -TestCategory  "${{ inputs.test-category }}"
+
     - name: Upload test results (${{ inputs.test-category }})
       # Always upload so failures are visible even when tests crash
-      if: always()
+      if: always() && steps.merge-results.outputs.SkipTestPublish != '1'
       uses: actions/upload-artifact@v4
       with:
         name: TestResults_${{ inputs.test-category }}
-        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}
+        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/merged_${{ inputs.test-category }}.trx
         if-no-files-found: ignore
 
     - name: Collect crash dumps

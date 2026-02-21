@@ -1,0 +1,84 @@
+# Composite action: Begin SonarQube analysis for .NET builds.
+# Equivalent to D:\sws\YAML\templates\steps\step_prepare_sonar.yml
+#
+# Uses the dotnet-sonarscanner global tool (equivalent to SonarQubePrepare@8
+# with scannerMode: dotnet). The branch parameter cleanup that removed
+# 'sonar.branch.name:develop' from the ADO task is replicated inline.
+#
+# The SonarQube server URL must be provided via SONAR_HOST_URL secret/variable.
+
+name: SonarQube Prepare (begin scan)
+description: >
+  Install dotnet-sonarscanner and run 'dotnet sonarscanner begin'.
+  Equivalent to D:\sws\YAML\templates\steps\step_prepare_sonar.yml
+
+inputs:
+  build-identifier:
+    description: 'Build identifier used as SonarQube project key suffix (e.g. TixCore → TixCore-NETCORE)'
+    required: true
+  sonar-host-url:
+    description: 'SonarQube server URL (e.g. https://sonar.example.com)'
+    required: true
+  sonar-token:
+    description: 'SonarQube authentication token'
+    required: true
+  branch-name:
+    description: 'Source branch name (used to set sonar.branch.name for non-main branches)'
+    required: false
+    default: ''
+  test-results-path:
+    description: 'Glob path to .trx test result files'
+    required: false
+    default: '${{ github.workspace }}/artifacts/testresults/**/*.trx'
+  coverage-reports-path:
+    description: 'Glob path to .xml coverage report files'
+    required: false
+    default: '${{ github.workspace }}/artifacts/testresults/**/*coverage.xml'
+  sources-directory:
+    description: 'Root directory for source files (sonar.projectBaseDir)'
+    required: false
+    default: '${{ github.workspace }}'
+
+runs:
+  using: composite
+  steps:
+    - name: Install dotnet-sonarscanner
+      shell: pwsh
+      run: dotnet tool install --global dotnet-sonarscanner --version '11.1.0.132901'
+
+    - name: SonarQube begin
+      shell: pwsh
+      env:
+        SONAR_TOKEN:    ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+      run: |
+        $projectKey = "${{ inputs.build-identifier }}-NETCORE"
+        $branch     = "${{ inputs.branch-name }}"
+
+        $extraProps  = "sonar.verbose=true`n"
+        $extraProps += "sonar.cs.vstest.reportsPaths=${{ inputs.test-results-path }}`n"
+        $extraProps += "sonar.cs.vscoveragexml.reportsPaths=${{ inputs.coverage-reports-path }}`n"
+        $extraProps += "sonar.javascript.node.maxspace=4096`n"
+        $extraProps += "sonar.scanner.scanAll=false`n"
+        $extraProps += "sonar.projectBaseDir=${{ inputs.sources-directory }}`n"
+
+        # Mirror the ADO step that strips 'develop' from sonar.branch.name
+        # (develop is the default/main branch in SonarQube; passing it as branch breaks analysis)
+        $branchArg = if ($branch -and $branch -ne 'develop' -and $branch -ne 'main') {
+            "/d:sonar.branch.name=`"$branch`""
+        } else { '' }
+
+        $cmd = "dotnet sonarscanner begin " +
+               "/k:`"$projectKey`" " +
+               "/d:sonar.host.url=`"$env:SONAR_HOST_URL`" " +
+               "/d:sonar.token=`"$env:SONAR_TOKEN`" " +
+               $branchArg + " " +
+               "/d:sonar.verbose=true " +
+               "/d:`"sonar.cs.vstest.reportsPaths=${{ inputs.test-results-path }}`" " +
+               "/d:`"sonar.cs.vscoveragexml.reportsPaths=${{ inputs.coverage-reports-path }}`" " +
+               "/d:sonar.javascript.node.maxspace=4096 " +
+               "/d:sonar.scanner.scanAll=false " +
+               "/d:`"sonar.projectBaseDir=${{ inputs.sources-directory }}`""
+
+        Write-Host $cmd
+        Invoke-Expression $cmd

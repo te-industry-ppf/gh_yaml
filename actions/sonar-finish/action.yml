@@ -1,0 +1,94 @@
+# Composite action: Finish SonarQube analysis and check quality gate.
+# Equivalent to D:\sws\YAML\templates\steps\step_finish_sonar.yml
+#
+# Steps:
+#   1. Convert .coverage files to XML with dotnet-coverage (required by SonarQube)
+#   2. Run 'dotnet sonarscanner end'
+#   3. Check quality gate result and annotate the run summary
+#
+# Quality gate failures are treated as warnings (not build failures) to
+# mirror the ADO 'SucceededWithIssues' behaviour.
+
+name: SonarQube Finish (end scan + quality gate)
+description: >
+  Convert coverage, run 'dotnet sonarscanner end', and check the quality gate.
+  Equivalent to D:\sws\YAML\templates\steps\step_finish_sonar.yml
+
+inputs:
+  sonar-token:
+    description: 'SonarQube authentication token'
+    required: true
+  sonar-host-url:
+    description: 'SonarQube server URL'
+    required: true
+  coverage-input-glob:
+    description: 'Glob for raw .coverage files to merge before analysis'
+    required: false
+    default: '${{ github.workspace }}/artifacts/testresults/**/*.coverage'
+  coverage-output-xml:
+    description: 'Path for the merged coverage XML file passed to SonarQube'
+    required: false
+    default: '${{ runner.temp }}/sonar_coverage.xml'
+
+runs:
+  using: composite
+  steps:
+    - name: Install dotnet-coverage
+      shell: pwsh
+      run: dotnet tool install --global dotnet-coverage --version '17.13.1'
+
+    - name: Convert coverage to SonarQube XML format
+      shell: pwsh
+      run: |
+        Write-Host "Merging coverage files: ${{ inputs.coverage-input-glob }}"
+        dotnet-coverage merge "${{ inputs.coverage-input-glob }}" `
+            --output "${{ inputs.coverage-output-xml }}" `
+            --output-format xml
+
+    - name: SonarQube end
+      id: sonar-end
+      shell: pwsh
+      env:
+        SONAR_TOKEN:    ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+      run: |
+        dotnet sonarscanner end /d:sonar.token="$env:SONAR_TOKEN"
+
+    - name: Check SonarQube quality gate
+      if: always()
+      shell: pwsh
+      env:
+        SONAR_TOKEN:    ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+      run: |
+        # Poll the quality gate status via the SonarQube Web API
+        # (mirrors the ADO step that reads SonarQubeBuildSummary.md)
+        $headers = @{ Authorization = "Bearer $env:SONAR_TOKEN" }
+        $maxWait = 300   # seconds
+        $elapsed = 0
+        $status  = $null
+
+        while ($elapsed -lt $maxWait) {
+            try {
+                $response = Invoke-RestMethod `
+                    -Uri     "$env:SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$env:SONAR_PROJECT_KEY" `
+                    -Headers $headers
+                $status = $response.projectStatus.status
+                if ($status -ne "NONE" -and $status -ne "IN_PROGRESS") { break }
+            } catch { Write-Warning "Quality gate poll failed: $_" }
+            Start-Sleep 10; $elapsed += 10
+        }
+
+        Write-Host "SonarQube quality gate status: $status"
+
+        if ($status -eq "ERROR") {
+            # Mirror ADO SucceededWithIssues: warn but do not fail the build
+            Write-Host "::warning::SonarQube Quality Gate FAILED. Review findings at $env:SONAR_HOST_URL"
+            "sonar_result=failed" >> $env:GITHUB_OUTPUT
+            # Append to job summary
+            "## ⚠️ SonarQube Quality Gate: FAILED" >> $env:GITHUB_STEP_SUMMARY
+            "Review findings: $env:SONAR_HOST_URL"  >> $env:GITHUB_STEP_SUMMARY
+        } else {
+            "sonar_result=success" >> $env:GITHUB_OUTPUT
+            "## ✅ SonarQube Quality Gate: PASSED" >> $env:GITHUB_STEP_SUMMARY
+        }
