@@ -23,6 +23,10 @@ inputs:
   artifact-base-dir:
     description: 'Base directory where test results and crash dumps are written'
     required: true
+  test-framework:
+    description: 'Target framework used by dotnet test'
+    required: false
+    default: 'net8.0'
   oracle-connection-string:
     description: 'Oracle connection string (integration tests)'
     required: false
@@ -67,7 +71,7 @@ runs:
           "test", "`"${{ inputs.solution }}`"",
           "--no-restore", "--no-build",
           "--configuration", "Release",
-          "--framework", "net8.0",
+          "--framework", "${{ inputs.test-framework }}",
           "--collect", "`"Code Coverage`"",
           "--nologo",
           "--blame-crash",

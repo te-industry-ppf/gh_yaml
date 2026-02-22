@@ -93,6 +93,8 @@ on:
         required: false
       SONAR_TOKEN:
         required: false
+      SONAR_HOST_URL:
+        required: false
       GITHUB_PRIVATE_KEY:
         required: false
       GITHUB_APP_ID:
@@ -210,6 +212,8 @@ jobs:
     name: Build
     runs-on: ${{ inputs.runner }}
     needs: [prepare]
+    outputs:
+      dotnet-test-tfm: ${{ steps.capture-build-vars.outputs.dotnet-test-tfm }}
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
       PACKAGE_VERSION:   ${{ needs.prepare.outputs.package-version }}
@@ -248,6 +252,14 @@ jobs:
           & "./.gh_yaml/scripts/SetupBuildVariables.ps1" `
               -SolutionPath "$env:SOLUTION_PATH" `
               -BuildType    "${{ inputs.build-type }}"
+
+      - name: Capture build variables for downstream jobs
+        id: capture-build-vars
+        shell: pwsh
+        run: |
+          $tfm = if ($env:DOTNET_TEST_TFM) { $env:DOTNET_TEST_TFM } elseif ($env:DOTNET_PUBLISH_TFM) { $env:DOTNET_PUBLISH_TFM } else { 'net8.0' }
+          "dotnet-test-tfm=$tfm" >> $env:GITHUB_OUTPUT
+          Write-Host "Using DOTNET_TEST_TFM=$tfm"
 
       - name: Setup .NET SDKs
         uses: TIPS-ORG/gh_yaml/actions/setup-dotnet@main
@@ -340,6 +352,7 @@ jobs:
         with:
           solution:                  ${{ inputs.solution }}
           test-category:             all
+          test-framework:            ${{ steps.capture-build-vars.outputs.dotnet-test-tfm }}
           artifact-base-dir:         ${{ github.workspace }}/artifacts
           oracle-connection-string:  ${{ secrets.ORACLE_INTEGRATION_TEST_CONNECTION_STRING }}
           mssql-connection-string:   ${{ secrets.MSSQL_INTEGRATION_TEST_CONNECTION_STRING }}
@@ -350,6 +363,7 @@ jobs:
         if: ${{ inputs.run-sonar }}
         uses: TIPS-ORG/gh_yaml/actions/sonar-finish@main
         with:
+          build-identifier: ${{ inputs.build-identifier }}
           sonar-token:    ${{ secrets.SONAR_TOKEN }}
           sonar-host-url: ${{ secrets.SONAR_HOST_URL }}
           coverage-input-glob:  ${{ github.workspace }}/artifacts/testresults/**/*.coverage
@@ -375,6 +389,13 @@ jobs:
         with:
           name: Packages
           path: ${{ github.workspace }}/artifacts/package
+          if-no-files-found: ignore
+
+      - name: Upload tipsregistry
+        uses: actions/upload-artifact@v4
+        with:
+          name: tipsregistry
+          path: ${{ github.workspace }}/artifacts/tipsregistry
           if-no-files-found: ignore
 
       # Test binaries uploaded per category so test jobs can download and run --no-build
@@ -441,6 +462,7 @@ jobs:
         with:
           solution:          ${{ inputs.solution }}
           test-category:     unit
+          test-framework:    ${{ needs.build.outputs.dotnet-test-tfm }}
           artifact-base-dir: ${{ github.workspace }}/artifacts
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -481,6 +503,7 @@ jobs:
         with:
           solution:                  ${{ inputs.solution }}
           test-category:             integration
+          test-framework:            ${{ needs.build.outputs.dotnet-test-tfm }}
           artifact-base-dir:         ${{ github.workspace }}/artifacts
           oracle-connection-string:  ${{ secrets.ORACLE_INTEGRATION_TEST_CONNECTION_STRING }}
 
@@ -522,6 +545,7 @@ jobs:
         with:
           solution:                 ${{ inputs.solution }}
           test-category:            mssql
+          test-framework:           ${{ needs.build.outputs.dotnet-test-tfm }}
           artifact-base-dir:        ${{ github.workspace }}/artifacts
           mssql-connection-string:  ${{ secrets.MSSQL_INTEGRATION_TEST_CONNECTION_STRING }}
           mssql-password:           ${{ secrets.MSSQL_INTEGRATION_TEST_PASSWORD }}

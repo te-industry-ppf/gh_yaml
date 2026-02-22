@@ -15,6 +15,9 @@ description: >
   Equivalent to D:\sws\YAML\templates\steps\step_finish_sonar.yml
 
 inputs:
+  build-identifier:
+    description: 'Build identifier used as SonarQube project key suffix (e.g. TixCore → TixCore-NETCORE)'
+    required: true
   sonar-token:
     description: 'SonarQube authentication token'
     required: true
@@ -63,6 +66,7 @@ runs:
       run: |
         # Poll the quality gate status via the SonarQube Web API
         # (mirrors the ADO step that reads SonarQubeBuildSummary.md)
+        $projectKey = "${{ inputs.build-identifier }}-NETCORE"
         $headers = @{ Authorization = "Bearer $env:SONAR_TOKEN" }
         $maxWait = 300   # seconds
         $elapsed = 0
@@ -71,7 +75,7 @@ runs:
         while ($elapsed -lt $maxWait) {
             try {
                 $response = Invoke-RestMethod `
-                    -Uri     "$env:SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$env:SONAR_PROJECT_KEY" `
+                    -Uri     "$env:SONAR_HOST_URL/api/qualitygates/project_status?projectKey=$projectKey" `
                     -Headers $headers
                 $status = $response.projectStatus.status
                 if ($status -ne "NONE" -and $status -ne "IN_PROGRESS") { break }
