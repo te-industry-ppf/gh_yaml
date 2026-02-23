@@ -311,6 +311,7 @@ jobs:
             $env:DOTNET_COMMON_ARGS
 
       - name: dotnet build
+        timeout-minutes: 25
         shell: pwsh
         run: |
           dotnet build "$env:SOLUTION_PATH" `
