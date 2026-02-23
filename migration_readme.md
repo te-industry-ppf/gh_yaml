@@ -204,7 +204,7 @@ All scripts and composite actions have been ported. No outstanding items remain.
 ## One-time setup checklist
 
 - [ ] Push `gh_yaml` to GitHub and note the org/repo path.
-- [ ] Replace every occurrence of `TIPS-ORG/gh_yaml` in all workflow and action files with `your-org/gh_yaml`.
+- [ ] Replace every occurrence of `zitzlthotieto/gh_yaml` in all workflow and action files with `your-org/gh_yaml`.
 - [ ] Register the self-hosted runner(s) under the label `TietoDocker-01`
       (Settings → Actions → Runners), or update the `runner` input default.
 - [ ] Add all secrets listed above to the repository or organisation.
