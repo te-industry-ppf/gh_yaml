@@ -223,12 +223,11 @@ jobs:
       - name: Verify build attempt
         # Re-running individual jobs is not supported; trigger a new run instead.
         # Mirrors YAML/scripts/VerifyBuildAttempt.ps1
-        # change back to "github.run_attempt > 1" after testing to enable the check
-        if: ${{ false }}
+        if: ${{ github.run_attempt > 1 }}
         shell: pwsh
         run: |
           Write-Host "::error::Re-running the build job is not supported. Please trigger a new build instead."
-          exit 1
+        # add this back after testing: exit 1
 
       - name: Checkout sources
         uses: actions/checkout@v4
