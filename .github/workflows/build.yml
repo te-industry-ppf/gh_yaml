@@ -1,13 +1,13 @@
 # Main reusable workflow for TIX builds.
 # Equivalent to D:\sws\YAML\templates\build.yml + templates\stages.yml
 #
-# IMPORTANT: Replace 'zitzlthotieto/gh_yaml' with your actual GitHub org/repo name
+# IMPORTANT: Replace 'zte-industry-ppf/gh_yaml' with your actual GitHub org/repo name
 #            in all composite action `uses:` references below.
 #
 # Usage from a consuming workflow:
 #   jobs:
 #     call-build:
-#       uses: zitzlthotieto/gh_yaml/.github/workflows/build.yml@main
+#       uses: zte-industry-ppf/gh_yaml/.github/workflows/build.yml@main
 #       with:
 #         build-type: CI
 #         build-identifier: TixCore
@@ -239,7 +239,7 @@ jobs:
       - name: Checkout gh_yaml scripts
         uses: actions/checkout@v4
         with:
-          repository: zitzlthotieto/gh_yaml
+          repository: zte-industry-ppf/gh_yaml
           ref: main
           path: .gh_yaml
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -262,7 +262,7 @@ jobs:
           Write-Host "Using DOTNET_TEST_TFM=$tfm"
 
       - name: Setup .NET SDKs
-        uses: zitzlthotieto/gh_yaml/actions/setup-dotnet@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
       - name: Print environment
         shell: pwsh
@@ -270,7 +270,7 @@ jobs:
           Get-ChildItem Env: | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
 
       - name: Authenticate NuGet sources
-        uses: zitzlthotieto/gh_yaml/actions/dotnet-restore@main
+        uses: zte-industry-ppf/gh_yaml/actions/dotnet-restore@main
         with:
           solution:          ${{ inputs.solution }}
           azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
@@ -278,7 +278,7 @@ jobs:
           auth-only:         'true'
 
       - name: Setup NuGet feeds and resolve shared package versions
-        uses: zitzlthotieto/gh_yaml/actions/setup-nugets@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-nugets@main
         with:
           build-type:                ${{ inputs.build-type }}
           safe-branch:               ${{ needs.prepare.outputs.safe-branch }}
@@ -288,7 +288,7 @@ jobs:
 
       - name: SonarQube begin
         if: ${{ inputs.run-sonar }}
-        uses: zitzlthotieto/gh_yaml/actions/sonar-prepare@main
+        uses: zte-industry-ppf/gh_yaml/actions/sonar-prepare@main
         with:
           build-identifier: ${{ inputs.build-identifier }}
           sonar-host-url:   ${{ secrets.SONAR_HOST_URL }}
@@ -349,7 +349,7 @@ jobs:
       # When Sonar is enabled tests run inline here – same as ADO Nightly pattern
       - name: Run tests inline (Sonar mode)
         if: ${{ inputs.run-sonar }}
-        uses: zitzlthotieto/gh_yaml/actions/run-test@main
+        uses: zte-industry-ppf/gh_yaml/actions/run-test@main
         with:
           solution:                  ${{ inputs.solution }}
           test-category:             all
@@ -362,7 +362,7 @@ jobs:
 
       - name: SonarQube finish
         if: ${{ inputs.run-sonar }}
-        uses: zitzlthotieto/gh_yaml/actions/sonar-finish@main
+        uses: zte-industry-ppf/gh_yaml/actions/sonar-finish@main
         with:
           build-identifier: ${{ inputs.build-identifier }}
           sonar-token:    ${{ secrets.SONAR_TOKEN }}
@@ -442,10 +442,10 @@ jobs:
           fetch-depth: 1
 
       - name: Setup .NET SDKs
-        uses: zitzlthotieto/gh_yaml/actions/setup-dotnet@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
       - name: Authenticate NuGet sources
-        uses: zitzlthotieto/gh_yaml/actions/dotnet-restore@main
+        uses: zte-industry-ppf/gh_yaml/actions/dotnet-restore@main
         with:
           solution:          ${{ inputs.solution }}
           azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
@@ -459,7 +459,7 @@ jobs:
           path: ${{ github.workspace }}/artifacts/tests/unit/bin
 
       - name: Run unit tests
-        uses: zitzlthotieto/gh_yaml/actions/run-test@main
+        uses: zte-industry-ppf/gh_yaml/actions/run-test@main
         with:
           solution:          ${{ inputs.solution }}
           test-category:     unit
@@ -483,10 +483,10 @@ jobs:
           fetch-depth: 1
 
       - name: Setup .NET SDKs
-        uses: zitzlthotieto/gh_yaml/actions/setup-dotnet@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
       - name: Authenticate NuGet sources
-        uses: zitzlthotieto/gh_yaml/actions/dotnet-restore@main
+        uses: zte-industry-ppf/gh_yaml/actions/dotnet-restore@main
         with:
           solution:          ${{ inputs.solution }}
           azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
@@ -500,7 +500,7 @@ jobs:
           path: ${{ github.workspace }}/artifacts/tests/integration/bin
 
       - name: Run integration tests
-        uses: zitzlthotieto/gh_yaml/actions/run-test@main
+        uses: zte-industry-ppf/gh_yaml/actions/run-test@main
         with:
           solution:                  ${{ inputs.solution }}
           test-category:             integration
@@ -525,10 +525,10 @@ jobs:
           fetch-depth: 1
 
       - name: Setup .NET SDKs
-        uses: zitzlthotieto/gh_yaml/actions/setup-dotnet@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
       - name: Authenticate NuGet sources
-        uses: zitzlthotieto/gh_yaml/actions/dotnet-restore@main
+        uses: zte-industry-ppf/gh_yaml/actions/dotnet-restore@main
         with:
           solution:          ${{ inputs.solution }}
           azure-devops-pat:  ${{ secrets.AZURE_DEVOPS_PAT }}
@@ -542,7 +542,7 @@ jobs:
           path: ${{ github.workspace }}/artifacts/tests/mssql/bin
 
       - name: Run MS SQL tests
-        uses: zitzlthotieto/gh_yaml/actions/run-test@main
+        uses: zte-industry-ppf/gh_yaml/actions/run-test@main
         with:
           solution:                 ${{ inputs.solution }}
           test-category:            mssql
@@ -581,7 +581,7 @@ jobs:
         run: Get-ChildItem -Recurse "$env:ARTIFACT_BASE_DIR" -Filter '*.nupkg' | ForEach-Object { $_.FullName }
 
       - name: Setup .NET SDKs
-        uses: zitzlthotieto/gh_yaml/actions/setup-dotnet@main
+        uses: zte-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
       - name: Push packages to ${{ inputs.publish-nuget-feed }}
         shell: pwsh
@@ -614,7 +614,7 @@ jobs:
       - name: Checkout gh_yaml scripts
         uses: actions/checkout@v4
         with:
-          repository: zitzlthotieto/gh_yaml
+          repository: zte-industry-ppf/gh_yaml
           ref: main
           path: .gh_yaml
           token: ${{ secrets.GITHUB_TOKEN }}
