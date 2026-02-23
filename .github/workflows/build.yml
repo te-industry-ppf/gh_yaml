@@ -41,7 +41,7 @@ on:
         description: 'Self-hosted runner label (equivalent to ADO pool name)'
         required: false
         type: string
-        default: 'TietoDocker-01'
+        default: 'ubuntu-slim' # later on might be self-hosted runner label 'TietoDocker-01'
       sql-app-name:
         description: 'Application name in SQL version history (M_VERSION). Empty = skip SQL job.'
         required: false
