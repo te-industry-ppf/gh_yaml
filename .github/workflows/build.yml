@@ -226,7 +226,7 @@ jobs:
         if: ${{ github.run_attempt > 1 }}
         shell: pwsh
         run: |
-          Write-Host "::error::Re-running the build job is not supported. Please trigger a new build instead."
+          Write-Host "::warning::Re-running the build job is not supported. Please trigger a new build instead."
         # add this back after testing: exit 1
 
       - name: Checkout sources
