@@ -26,8 +26,8 @@ $useCI      = ($BuildType -eq "Branch") -or ($BuildType -eq "CI")
 $useNightly = ($BuildType -eq "Branch") -or ($BuildType -eq "CI") -or ($BuildType -eq "Nightly")
 $useSprint  = $true  # always check sprint feed (fixed deps may live there, e.g. EUDR)
 
-$nugetConfigFile = (Get-ChildItem -Filter "*.config" | Where-Object { $_.BaseName -ieq "nuget" }).Name
-if (-not $nugetConfigFile) { Write-Error "nuget.config not found in $PWD"; exit 1 }
+$global:nugetConfigFile = (Get-ChildItem -Filter "*.config" | Where-Object { $_.BaseName -ieq "nuget" }).Name
+if (-not $global:nugetConfigFile) { Write-Error "nuget.config not found in $PWD"; exit 1 }
 
 Write-Output "UseBranch=$useBranch  UseCI=$useCI  UseNightly=$useNightly  UseSprint=$useSprint"
 
@@ -167,8 +167,8 @@ function Update-PackageSourceMapping {
 }
 
 # ── Set up feed configs ───────────────────────────────────────────────────────
-Copy-Item $nugetConfigFile "$nugetConfigFile.original" -Force
-dotnet nuget remove source "TIPS" --configfile $nugetConfigFile | Out-Null
+Copy-Item $global:nugetConfigFile "$global:nugetConfigFile.original" -Force
+dotnet nuget remove source "TIPS" --configfile $global:nugetConfigFile | Out-Null
 
 Write-NugetConfig -Condition $useBranch  -FeedName "TIX-BRANCH"  -PackageSourceUrl "https://pkgs.dev.azure.com/tieto-pe/_packaging/TIX-BRANCH/nuget/v3/index.json"
 Write-NugetConfig -Condition $useCI      -FeedName "TIX-CI"      -PackageSourceUrl "https://pkgs.dev.azure.com/tieto-pe/_packaging/TIX-CI/nuget/v3/index.json"
@@ -176,9 +176,9 @@ Write-NugetConfig -Condition $useNightly -FeedName "TIX-NIGHTLY" -PackageSourceU
 Write-NugetConfig -Condition $useSprint  -FeedName "TIX-SPRINT"  -PackageSourceUrl "https://pkgs.dev.azure.com/tieto-pe/_packaging/TIX-SPRINT/nuget/v3/index.json"
 Write-NugetConfig -Condition $true       -FeedName "TIPS"        -PackageSourceUrl "https://pkgs.dev.azure.com/tieto-pe/_packaging/TIX-NUGETPE/nuget/v3/index.json"
 
-[xml]$cfg = Get-Content $nugetConfigFile
+[xml]$cfg = Get-Content $global:nugetConfigFile
 Update-PackageSourceMapping $cfg
-$cfg.Save($nugetConfigFile)
+$cfg.Save($global:nugetConfigFile)
 
 # ── Resolve versions for each dependency ─────────────────────────────────────
 $dependencies = Select-Xml -Path $TixDependenciesFile -XPath "//ModuleReference" | Select-Object -ExpandProperty Node
@@ -203,5 +203,5 @@ Remove-NugetConfig -Condition $useSprint  -FeedName "TIX-SPRINT"
 $env:NUGET_HTTP_CACHE_PATH = $oldNugetCache
 Remove-Item -Recurse $tempNugetCache -ErrorAction SilentlyContinue
 
-Write-Output "--- Modified nuget.config ---"; Get-Content $nugetConfigFile
+Write-Output "--- Modified nuget.config ---"; Get-Content $global:nugetConfigFile
 Write-Output "--- PackageVersions.md ---";    Get-Content PackageVersions.md

@@ -11,11 +11,6 @@ description: >
 runs:
   using: composite
   steps:
-    - name: Use .NET 8.x (runtime compatibility / code generation)
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.x'
-
     - name: Use .NET 9.x (code generation)
       uses: actions/setup-dotnet@v4
       with:
