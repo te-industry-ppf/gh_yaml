@@ -264,6 +264,9 @@ jobs:
       - name: Setup .NET SDKs
         uses: te-industry-ppf/gh_yaml/actions/setup-dotnet@main
 
+      - name: Setup Node.js
+        uses: te-industry-ppf/gh_yaml/actions/setup-node@main
+
       - name: Print environment
         shell: pwsh
         run: |

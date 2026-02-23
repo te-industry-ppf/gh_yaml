@@ -1,0 +1,20 @@
+# Composite action: Setup SDKs
+# Equivalent to D:\sws\YAML\templates\steps\step_use_dotnet.yml
+# Installs .NET 8, 9 and 10 SDKs on the runner (multiple versions needed for code generation).
+
+name: Setup Node.js
+description: >
+  Install Node.js and Yarn.
+  Equivalent to D:\sws\YAML\templates\steps\step_use_node.yml
+
+runs:
+  using: composite
+  steps:
+    - name: Use Node.js 22.17.0
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22.17.0'
+
+    - name: Enable Yarn Classic
+      shell: pwsh
+      run: corepack enable
