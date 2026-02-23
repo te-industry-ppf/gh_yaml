@@ -303,22 +303,24 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "$env:ARTIFACT_BASE_DIR/binlog" | Out-Null
-          dotnet restore "$env:SOLUTION_PATH" `
-            --no-http-cache `
-            --configfile "nuget.config" `
-            --verbosity minimal `
-            "-bl:$env:ARTIFACT_BASE_DIR/binlog/restore.binlog" `
-            $env:DOTNET_COMMON_ARGS
+          & dotnet @(
+            'restore', "$env:SOLUTION_PATH",
+            '--no-http-cache',
+            '--configfile', 'nuget.config',
+            '--verbosity', 'minimal',
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/restore.binlog"
+          ) + ($env:DOTNET_COMMON_ARGS -split ' ')
 
       - name: dotnet build
         timeout-minutes: 25
         shell: pwsh
         run: |
-          dotnet build "$env:SOLUTION_PATH" `
-            --no-restore `
-            --configuration $env:BUILD_CONFIGURATION `
-            "-bl:$env:ARTIFACT_BASE_DIR/binlog/build.binlog" `
-            $env:DOTNET_COMMON_ARGS
+          & dotnet @(
+            'build', "$env:SOLUTION_PATH",
+            '--no-restore',
+            '--configuration', $env:BUILD_CONFIGURATION,
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/build.binlog"
+          ) + ($env:DOTNET_COMMON_ARGS -split ' ')
 
       - name: Check for build warnings
         # Mirror ADO MarkBuildAsWarning.ps1: annotate and flag warnings found during build
@@ -330,25 +332,27 @@ jobs:
       - name: dotnet pack
         shell: pwsh
         run: |
-          dotnet pack "$env:SOLUTION_PATH" `
-            --no-restore --no-build `
-            --configuration $env:BUILD_CONFIGURATION `
-            "-bl:$env:ARTIFACT_BASE_DIR/binlog/pack.binlog" `
-            "/p:PackageVersion=$env:PACKAGE_VERSION" `
-            $env:DOTNET_COMMON_ARGS `
-            /p:ContinuousIntegrationBuild=true `
-            /p:WarnOnPackingNonPackableProject=false `
-            /p:NoWarn=NU5048
+          & dotnet @(
+            'pack', "$env:SOLUTION_PATH",
+            '--no-restore', '--no-build',
+            '--configuration', $env:BUILD_CONFIGURATION,
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/pack.binlog",
+            "/p:PackageVersion=$env:PACKAGE_VERSION",
+            '/p:ContinuousIntegrationBuild=true',
+            '/p:WarnOnPackingNonPackableProject=false',
+            '/p:NoWarn=NU5048'
+          ) + ($env:DOTNET_COMMON_ARGS -split ' ')
 
       - name: dotnet publish
         shell: pwsh
         run: |
-          dotnet publish "$env:SOLUTION_PATH" `
-            --no-restore --no-build `
-            --configuration $env:BUILD_CONFIGURATION `
-            --framework $env:DOTNET_PUBLISH_TFM `
-            "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish.binlog" `
-            $env:DOTNET_COMMON_ARGS
+          & dotnet @(
+            'publish', "$env:SOLUTION_PATH",
+            '--no-restore', '--no-build',
+            '--configuration', $env:BUILD_CONFIGURATION,
+            '--framework', $env:DOTNET_PUBLISH_TFM,
+            "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish.binlog"
+          ) + ($env:DOTNET_COMMON_ARGS -split ' ')
 
       # When Sonar is enabled tests run inline here – same as ADO Nightly pattern
       - name: Run tests inline (Sonar mode)
