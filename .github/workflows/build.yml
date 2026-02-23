@@ -303,24 +303,26 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path "$env:ARTIFACT_BASE_DIR/binlog" | Out-Null
-          & dotnet @(
+          $args = @(
             'restore', "$env:SOLUTION_PATH",
             '--no-http-cache',
             '--configfile', 'nuget.config',
             '--verbosity', 'minimal',
             "-bl:$env:ARTIFACT_BASE_DIR/binlog/restore.binlog"
           ) + ($env:DOTNET_COMMON_ARGS -split ' ')
+          & dotnet $args
 
       - name: dotnet build
         timeout-minutes: 25
         shell: pwsh
         run: |
-          & dotnet @(
+          $args = @(
             'build', "$env:SOLUTION_PATH",
             '--no-restore',
             '--configuration', $env:BUILD_CONFIGURATION,
             "-bl:$env:ARTIFACT_BASE_DIR/binlog/build.binlog"
           ) + ($env:DOTNET_COMMON_ARGS -split ' ')
+          & dotnet $args
 
       - name: Check for build warnings
         # Mirror ADO MarkBuildAsWarning.ps1: annotate and flag warnings found during build
@@ -332,7 +334,7 @@ jobs:
       - name: dotnet pack
         shell: pwsh
         run: |
-          & dotnet @(
+          $args = @(
             'pack', "$env:SOLUTION_PATH",
             '--no-restore', '--no-build',
             '--configuration', $env:BUILD_CONFIGURATION,
@@ -342,17 +344,19 @@ jobs:
             '/p:WarnOnPackingNonPackableProject=false',
             '/p:NoWarn=NU5048'
           ) + ($env:DOTNET_COMMON_ARGS -split ' ')
+          & dotnet $args
 
       - name: dotnet publish
         shell: pwsh
         run: |
-          & dotnet @(
+          $args = @(
             'publish', "$env:SOLUTION_PATH",
             '--no-restore', '--no-build',
             '--configuration', $env:BUILD_CONFIGURATION,
             '--framework', $env:DOTNET_PUBLISH_TFM,
             "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish.binlog"
           ) + ($env:DOTNET_COMMON_ARGS -split ' ')
+          & dotnet $args
 
       # When Sonar is enabled tests run inline here – same as ADO Nightly pattern
       - name: Run tests inline (Sonar mode)
