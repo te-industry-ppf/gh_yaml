@@ -103,6 +103,7 @@ on:
         required: false
 
 env:
+  TF_BUILD: 'true' # needed for dotnet build, we rely on having it set to true
   TIPS_YAML_BUILD: 'true'
   TIX_ISOLATED: 'true'
   TIX_YAML_BUILD: 'true'
