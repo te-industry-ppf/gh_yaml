@@ -128,6 +128,8 @@ jobs:
       package-version: ${{ steps.version.outputs.package-version }}
       safe-branch:     ${{ steps.version.outputs.safe-branch }}
       sprint-number:   ${{ steps.version.outputs.sprint-number }}
+      source-branch-name: ${{ steps.version.outputs.source-branch-name }}
+      source-version:     ${{ steps.version.outputs.source-version }}
     steps:
       - name: Compute version numbers
         id: version
@@ -141,6 +143,8 @@ jobs:
           # Safe branch: replace /, # with -, strip _ (mirrors ADO Tix.BuildSafeSourceBranchName)
           $rawBranch   = '${{ github.head_ref || github.ref_name }}'
           $safeBranch  = $rawBranch -replace '/', '-' -replace '#', '' -replace '_', '-'
+          $sourceBranchName = $rawBranch
+          $sourceVersion    = '${{ github.sha }}'
 
           switch ($buildType) {
             'Branch' {
@@ -184,11 +188,15 @@ jobs:
           Write-Host "IsHotfix:        $isHotfix"
           Write-Host "RunNumber:       $runNumber"
           Write-Host "Runner:          ${{ inputs.runner }}"
+          Write-Host "SourceBranch:    $sourceBranchName"
+          Write-Host "SourceVersion:   $sourceVersion"
 
           "build-number=$buildNumber"       >> $env:GITHUB_OUTPUT
           "package-version=$packageVersion" >> $env:GITHUB_OUTPUT
           "safe-branch=$safeBranch"         >> $env:GITHUB_OUTPUT
           "sprint-number=$sprintNumber"     >> $env:GITHUB_OUTPUT
+          "source-branch-name=$sourceBranchName" >> $env:GITHUB_OUTPUT
+          "source-version=$sourceVersion"        >> $env:GITHUB_OUTPUT
 
       - name: Set run display name
         shell: pwsh
@@ -220,6 +228,9 @@ jobs:
       PACKAGE_VERSION:   ${{ needs.prepare.outputs.package-version }}
       SOLUTION_PATH:     ${{ inputs.solution }}
       SAFE_BRANCH:       ${{ needs.prepare.outputs.safe-branch }}
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Verify build attempt
         # Re-running individual jobs is not supported; trigger a new run instead.
@@ -444,10 +455,13 @@ jobs:
   unit-test:
     name: Unit Tests
     runs-on: ${{ inputs.runner }}
-    needs: [build]
+    needs: [build, prepare]
     if: ${{ !inputs.run-sonar }}
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -485,10 +499,13 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ${{ inputs.runner }}
-    needs: [build]
+    needs: [build, prepare]
     if: ${{ !inputs.run-sonar }}
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -527,10 +544,13 @@ jobs:
   mssql-test:
     name: MS SQL Tests
     runs-on: ${{ inputs.runner }}
-    needs: [build]
+    needs: [build, prepare]
     if: ${{ !inputs.run-sonar }}
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -575,13 +595,16 @@ jobs:
   publish-nuget:
     name: Publish NuGet → ${{ inputs.publish-nuget-feed }}
     runs-on: ${{ inputs.runner }}
-    needs: [build, unit-test, integration-test, mssql-test]
+    needs: [build, unit-test, integration-test, mssql-test, prepare]
     if: ${{ inputs.publish-nuget-feed != '' && !failure() && !cancelled() }}
     # environment protection rule acts as the manual gate; omit when publishing immediately
     environment: ${{ inputs.publish-nuget-on-first-attempt == false && 'nuget-gate' || '' }}
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/nugetdownload
       FEED_URL: https://pkgs.dev.azure.com/tieto-pe/_packaging/${{ inputs.publish-nuget-feed }}/nuget/v3/index.json
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Download Packages artifact
         uses: actions/download-artifact@v4
@@ -615,10 +638,13 @@ jobs:
   publish-gitops:
     name: Update GitOps (${{ inputs.publish-gitops }})
     runs-on: ${{ inputs.runner }}
-    needs: [build, unit-test, integration-test, mssql-test]
+    needs: [build, unit-test, integration-test, mssql-test, prepare]
     if: ${{ inputs.publish-gitops != '' && !failure() && !cancelled() }}
     env:
       GITOPS_DIR: ${{ github.workspace }}/GITOPS
+      BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
+      BUILD_SOURCEBRANCHNAME: ${{ needs.prepare.outputs.source-branch-name }}
+      BUILD_SOURCEVERSION:    ${{ needs.prepare.outputs.source-version }}
     steps:
       - name: Install powershell-jwt
         shell: pwsh
