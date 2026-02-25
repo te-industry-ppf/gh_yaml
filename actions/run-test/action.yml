@@ -105,6 +105,43 @@ runs:
             -TempDirectory "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}" `
             -TestCategory  "${{ inputs.test-category }}"
 
+    - name: Parse test results and output warnings (${{ inputs.test-category }})
+      id: test-report
+      if: always() && steps.merge-results.outputs.SkipTestPublish != '1'
+      shell: pwsh
+      run: |
+        [xml]$trx = Get-Content "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/merged_${{ inputs.test-category }}.trx"
+        $resultSummary = $trx.TestRun.ResultSummary
+        $total = [int]$resultSummary.Counters.total
+        $passed = [int]$resultSummary.Counters.passed
+        $failed = [int]$resultSummary.Counters.failed
+        $skipped = [int]$resultSummary.Counters.skipped
+        
+        Write-Host "Test Results Summary (${{ inputs.test-category }}):"
+        Write-Host "  Total:  $total"
+        Write-Host "  Passed: $passed"
+        Write-Host "  Failed: $failed"
+        Write-Host "  Skipped: $skipped"
+        
+        # Output for downstream steps
+        "total=$total" >> $env:GITHUB_OUTPUT
+        "passed=$passed" >> $env:GITHUB_OUTPUT
+        "failed=$failed" >> $env:GITHUB_OUTPUT
+        "skipped=$skipped" >> $env:GITHUB_OUTPUT
+        
+        if ($failed -gt 0) {
+          Write-Host "::warning::$failed test(s) failed in ${{ inputs.test-category }} category"
+        }
+
+    - name: Report test results (${{ inputs.test-category }})
+      if: always() && steps.merge-results.outputs.SkipTestPublish != '1'
+      uses: dorny/test-reporter@v1
+      with:
+        name: Test Results - ${{ inputs.test-category }}
+        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/merged_${{ inputs.test-category }}.trx
+        reporter: dotnet-trx
+        fail-on-error: false
+
     - name: Upload test results (${{ inputs.test-category }})
       # Always upload so failures are visible even when tests crash
       if: always() && steps.merge-results.outputs.SkipTestPublish != '1'
