@@ -57,4 +57,5 @@ if ($dbPropsDir) {
     }
 } else {
     Write-Output "::error::Directory.Build.props not found above '$solutionDir'."
+    exit 1
 }
