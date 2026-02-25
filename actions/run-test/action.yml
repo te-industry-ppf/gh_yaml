@@ -110,7 +110,7 @@ runs:
       if: always() && steps.merge-results.outputs.SkipTestPublish != '1'
       shell: pwsh
       run: |
-        [xml]$trx = Get-Content "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/merged_${{ inputs.test-category }}.trx"
+        [xml]$trx = Get-Content "${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/${{ inputs.test-category }}.trx"
         $resultSummary = $trx.TestRun.ResultSummary
         $total = [int]$resultSummary.Counters.total
         $passed = [int]$resultSummary.Counters.passed
@@ -138,7 +138,7 @@ runs:
       uses: dorny/test-reporter@v1
       with:
         name: Test Results - ${{ inputs.test-category }}
-        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/merged_${{ inputs.test-category }}.trx
+        path: ${{ inputs.artifact-base-dir }}/testresults/${{ inputs.test-category }}/${{ inputs.test-category }}.trx
         reporter: dotnet-trx
         fail-on-error: false
 
