@@ -64,9 +64,6 @@ runs:
         $resultsDir = Join-Path '${{ inputs.artifact-base-dir }}' "testresults/$category"
         New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 
-        # Build the category filter argument; 'all' means no filter (Sonar/Nightly inline run)
-        $filterArg = if ($category -ne 'all') { "--filter ""testcategory=$category""" } else { '' }
-
         $args = @(
           "test", "`"${{ inputs.solution }}`"",
           "--no-restore", "--no-build",
@@ -78,13 +75,28 @@ runs:
           "--logger", "trx",
           "--results-directory", "`"$resultsDir`""
         )
-        if ($filterArg) { $args += $filterArg }
+
+        # Build the category filter argument; 'all' means no filter (Sonar/Nightly inline run)
+        if ($category -ne 'all') {
+          $args += "--p:testcategory=$category" 
+        }
 
         Write-Host "dotnet $($args -join ' ')"
         & dotnet @args
-        # Do not propagate test failures as step failure; let the publish step decide
-        # (mirrors ADO continueOnError: true on the test task)
-        exit 0
+        $exitCode = $LASTEXITCODE
+        $trxFiles = Get-ChildItem -Path $resultsDir -Filter *.trx -ErrorAction SilentlyContinue
+        if ($exitCode -eq 0) {
+          # All tests passed
+          exit 0
+        } elseif ($trxFiles.Count -gt 0) {
+          # dotnet test ran and produced results (test failures)
+          Write-Host "dotnet test failed, but .trx results found. Allowing step to continue for reporting."
+          exit 0
+        } else {
+          # dotnet test failed and no results produced (infrastructure/command-line error)
+          Write-Host "dotnet test failed and no .trx results found. Failing step."
+          exit $exitCode
+        }
 
     - name: Merge test results (${{ inputs.test-category }})
       # Mirrors YAML/scripts/MergeTestResults.ps1: combines per-assembly .trx files
