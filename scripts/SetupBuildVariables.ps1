@@ -23,6 +23,12 @@ Write-Output "BuildType    : $BuildType"
 Write-Output "CurrentDir   : $PWD"
 Write-Output "Workspace    : $env:GITHUB_WORKSPACE"
 
+# SolutionPath is relative to the repository root, which is the default working directory in GHA. If provided, make it absolute.
+if ($SolutionPath) {
+    $SolutionPath = Join-Path $env:GITHUB_WORKSPACE $SolutionPath
+    Write-Output "Resolved SolutionPath: $SolutionPath"
+}
+
 # ── 1. Find Directory.Build.props walking up from the solution directory ──────
 function Find-FirstParentPath {
     param([string]$Path, [string]$FileName)
