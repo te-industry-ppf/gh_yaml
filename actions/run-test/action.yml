@@ -73,7 +73,7 @@ runs:
           "--nologo",
           "--blame-crash",
           "--logger", "trx",
-          "--results-directory", "`"$resultsDir`""
+          "--results-directory", "$resultsDir"
         )
 
         # Build the category filter argument; 'all' means no filter (Sonar/Nightly inline run)
