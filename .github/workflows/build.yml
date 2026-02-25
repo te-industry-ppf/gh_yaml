@@ -273,7 +273,7 @@ jobs:
 
       - name: Setup build variables
         # Reads Directory.Build.props to override DOTNET_PUBLISH_TFM / DOTNET_TEST_TFM
-        # and compute CONTAINER_IMAGE_VERSION. Mirrors YAML/scripts/SetupBuildVariables.ps1.
+        # Mirrors YAML/scripts/SetupBuildVariables.ps1.
         shell: pwsh
         run: |
           & "./.gh_yaml/scripts/SetupBuildVariables.ps1" `

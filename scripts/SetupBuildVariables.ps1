@@ -20,6 +20,8 @@ $ErrorActionPreference = "Stop"
 Write-Output "=================== SetupBuildVariables (GHA) ==================="
 Write-Output "SolutionPath : $SolutionPath"
 Write-Output "BuildType    : $BuildType"
+Write-Output "CurrentDir   : $PWD"
+Write-Output "Workspace    : $env:GITHUB_WORKSPACE"
 
 # ── 1. Find Directory.Build.props walking up from the solution directory ──────
 function Find-FirstParentPath {
@@ -48,22 +50,5 @@ if ($dbPropsDir) {
         Write-Output "NetCorePublishVersion not found in Directory.Build.props; using workflow default."
     }
 } else {
-    Write-Warning "Directory.Build.props not found above '$solutionDir'."
-}
-
-# ── 2. Compute ContainerImageVersion (mirrors ADO SetupBuildVariables.ps1) ────
-$packageVersion = $env:PACKAGE_VERSION   # set by prepare job
-
-if (-not $packageVersion) {
-    Write-Warning "PACKAGE_VERSION env var not set; skipping ContainerImageVersion."
-} else {
-    $containerImageVersion = switch ($BuildType) {
-        'Branch'  { "br-$packageVersion" }
-        'CI'      { "ci-$packageVersion" }
-        'Nightly' { "ni-$packageVersion" }
-        'Sprint'  { $packageVersion }
-        default   { $packageVersion }
-    }
-    Write-Output "ContainerImageVersion: $containerImageVersion"
-    "CONTAINER_IMAGE_VERSION=$containerImageVersion" >> $env:GITHUB_ENV
+    Write-Output "::error::Directory.Build.props not found above '$solutionDir'."
 }
