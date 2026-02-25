@@ -119,6 +119,8 @@ jobs:
   # Equivalent to ADO Prepare stage (stages.yml → job_prepare.yml + variables.yml)
   # ADO uses counter() for monotonic patch numbers; GHA uses github.run_number
   # which is unique per workflow and always increasing – functionally equivalent.
+  #
+  # TODO zitzltho: the run number might not fit what we want for package versioning (e.g. 1234 for the 1234th run on that branch, including failed attempts). Consider using a custom counter stored in a file in the repo or an external service (e.g. GitHub API to get the latest tag and increment).
   # ───────────────────────────────────────────────────────────────────────────
   prepare:
     name: Prepare
@@ -126,6 +128,7 @@ jobs:
     outputs:
       build-number:    ${{ steps.version.outputs.build-number }}
       package-version: ${{ steps.version.outputs.package-version }}
+      container-image-version: ${{ steps.version.outputs.container-image-version }}
       safe-branch:     ${{ steps.version.outputs.safe-branch }}
       sprint-number:   ${{ steps.version.outputs.sprint-number }}
       source-branch-name: ${{ steps.version.outputs.source-branch-name }}
@@ -153,24 +156,32 @@ jobs:
               $targetBranch   = '${{ github.base_ref }}'
               if ($targetBranch -match 'sprint_g_(\d+)') { $sprintNumber = $Matches[1] }
               $buildNumber    = "0.0.0-$safeBranch-$($runNumber.ToString('D2'))"
-              $packageVersion = "$safeBranch-$($runNumber.ToString('D2'))"
+              $packageBuildNumber = "$safeBranch-$($runNumber.ToString('D2'))"
+              $packageVersion = "1.0.5.0-br-" + $buildNumber
+              $containerImageVersion = "br-" + $buildNumber
             }
             'CI' {
               $buildNumber    = "1.0.0.$runNumber"
-              $packageVersion = "$($now.ToString('yyyy-MM-dd'))-$runNumber"
+              $packageBuildNumber = "$($now.ToString('yyyy-MM-dd'))-$($runNumber.ToString('D2'))"
               $sprintNumber   = '0'
+              $packageVersion = "1.0.3.0-ci-" + $buildNumber
+              $containerImageVersion = "ci-" + $buildNumber
             }
             'Nightly' {
               $buildNumber    = "$($now.ToString('yyyy.MM.dd')).$runNumber"
-              $packageVersion = "$($now.ToString('yyyy-MM-dd'))-$runNumber"
+              $packageBuildNumber = "$($now.ToString('yyyy-MM-dd'))-$($runNumber.ToString('D2'))"
               $sprintNumber   = '0'
+              $packageVersion = "1.0.1.0-ni-" + $buildNumber
+              $containerImageVersion = "ni-" + $buildNumber
             }
             'Sprint' {
               $branch         = '${{ github.ref_name }}'
               $sprintNumber   = ($branch -replace 'sprint_g_', '') -replace '_htfx', ''
               $prefix         = if ($isHotfix) { "1.0.$sprintNumber-HTFX" } else { "1.0.$sprintNumber" }
               $buildNumber    = "$prefix.$runNumber"
-              $packageVersion = "$prefix.$runNumber"
+              $packageBuildNumber = "$prefix-$($runNumber.ToString('D2'))"
+              $packageVersion = $packageBuildNumber
+              $containerImageVersion = "$prefix-$($runNumber.ToString('D2'))"
             }
             default {
               Write-Error "Unknown build-type '$buildType'. Must be Branch, CI, Nightly or Sprint."
@@ -182,7 +193,9 @@ jobs:
           Write-Host "BuildIdentifier: ${{ inputs.build-identifier }}"
           Write-Host "Solution:        ${{ inputs.solution }}"
           Write-Host "BuildNumber:     $buildNumber"
+          Write-Host "PackageBuildNumber:     $packageBuildNumber"
           Write-Host "PackageVersion:  $packageVersion"
+          Write-Host "ContainerImageVersion:  $containerImageVersion"
           Write-Host "SafeBranch:      $safeBranch"
           Write-Host "SprintNumber:    $sprintNumber"
           Write-Host "IsHotfix:        $isHotfix"
@@ -193,6 +206,7 @@ jobs:
 
           "build-number=$buildNumber"       >> $env:GITHUB_OUTPUT
           "package-version=$packageVersion" >> $env:GITHUB_OUTPUT
+          "container-image-version=$containerImageVersion" >> $env:GITHUB_OUTPUT
           "safe-branch=$safeBranch"         >> $env:GITHUB_OUTPUT
           "sprint-number=$sprintNumber"     >> $env:GITHUB_OUTPUT
           "source-branch-name=$sourceBranchName" >> $env:GITHUB_OUTPUT
@@ -212,7 +226,7 @@ jobs:
           "| Build type | ${{ inputs.build-type }} |" >> $env:GITHUB_STEP_SUMMARY
           "| Solution   | ${{ inputs.solution }} |" >> $env:GITHUB_STEP_SUMMARY
           "| Package version | ${{ steps.version.outputs.package-version }} |" >> $env:GITHUB_STEP_SUMMARY
-
+          "| Container image version | ${{ steps.version.outputs.container-image-version }} |" >> $env:GITHUB_STEP_SUMMARY
   # ───────────────────────────────────────────────────────────────────────────
   # BUILD – restore, build, pack, publish, upload artifacts.
   # Equivalent to ADO Build stage (stages.yml → job_build.yml)
@@ -226,6 +240,7 @@ jobs:
     env:
       ARTIFACT_BASE_DIR: ${{ github.workspace }}/artifacts
       PACKAGE_VERSION:   ${{ needs.prepare.outputs.package-version }}
+      CONTAINER_IMAGE_VERSION: ${{ needs.prepare.outputs.container-image-version }}
       SOLUTION_PATH:     ${{ inputs.solution }}
       SAFE_BRANCH:       ${{ needs.prepare.outputs.safe-branch }}
       BUILD_BUILDNUMBER:     ${{ needs.prepare.outputs.build-number }}
@@ -369,6 +384,26 @@ jobs:
             "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish.binlog"
           ) + ($env:DOTNET_COMMON_ARGS -split ' ')
           & dotnet $args
+
+      - name: dotnet publish container images
+        shell: pwsh
+        run: |
+          # not implemented yet, where do we push the containers?
+          if ($env:CONTAINER_IMAGE_VERSION) {
+            $args = @(
+              'publish', "$env:SOLUTION_PATH",
+              '--no-restore', '--no-build',
+              '--configuration', $env:BUILD_CONFIGURATION,
+              '--framework', $env:DOTNET_PUBLISH_TFM,
+              '-p:PublishContainer=true',
+              "-p:ContainerImageVersion=$env:CONTAINER_IMAGE_VERSION",
+              "-bl:$env:ARTIFACT_BASE_DIR/binlog/publish_containers.binlog"
+            ) + ($env:DOTNET_COMMON_ARGS -split ' ')
+            Write-Host "::warning::Publishing container images with version $env:CONTAINER_IMAGE_VERSION not enabled yet. Skipping dotnet publish for containers."
+            Write-Host "dotnet $args"
+          } else {
+            Write-Host "CONTAINER_IMAGE_VERSION is not set. Skipping container image publish."
+          }
 
       # When Sonar is enabled tests run inline here – same as ADO Nightly pattern
       - name: Run tests inline (Sonar mode)
