@@ -157,22 +157,22 @@ jobs:
               if ($targetBranch -match 'sprint_g_(\d+)') { $sprintNumber = $Matches[1] }
               $buildNumber    = "0.0.0-$safeBranch-$($runNumber.ToString('D2'))"
               $packageBuildNumber = "$safeBranch-$($runNumber.ToString('D2'))"
-              $packageVersion = "1.0.5.0-br-" + $buildNumber
-              $containerImageVersion = "br-" + $buildNumber
+              $packageVersion = "1.0.5.0-br-" + $packageBuildNumber
+              $containerImageVersion = "br-" + $packageBuildNumber
             }
             'CI' {
               $buildNumber    = "1.0.0.$runNumber"
               $packageBuildNumber = "$($now.ToString('yyyy-MM-dd'))-$($runNumber.ToString('D2'))"
               $sprintNumber   = '0'
-              $packageVersion = "1.0.3.0-ci-" + $buildNumber
-              $containerImageVersion = "ci-" + $buildNumber
+              $packageVersion = "1.0.3.0-ci-" + $packageBuildNumber
+              $containerImageVersion = "ci-" + $packageBuildNumber
             }
             'Nightly' {
               $buildNumber    = "$($now.ToString('yyyy.MM.dd')).$runNumber"
               $packageBuildNumber = "$($now.ToString('yyyy-MM-dd'))-$($runNumber.ToString('D2'))"
               $sprintNumber   = '0'
-              $packageVersion = "1.0.1.0-ni-" + $buildNumber
-              $containerImageVersion = "ni-" + $buildNumber
+              $packageVersion = "1.0.1.0-ni-" + $packageBuildNumber
+              $containerImageVersion = "ni-" + $packageBuildNumber
             }
             'Sprint' {
               $branch         = '${{ github.ref_name }}'
