@@ -65,21 +65,17 @@ runs:
         New-Item -ItemType Directory -Force -Path $resultsDir | Out-Null
 
         $args = @(
-          "test", "`"${{ inputs.solution }}`"",
+          "test", "${{ inputs.solution }}",
           "--no-restore", "--no-build",
           "--configuration", "Release",
           "--framework", "${{ inputs.test-framework }}",
-          "--collect", "`"Code Coverage`"",
+          "--collect", "Code Coverage",
           "--nologo",
           "--blame-crash",
           "--logger", "trx",
-          "--results-directory", "$resultsDir"
+          "--results-directory", $resultsDir,
+          "/p:testcategory=$category"
         )
-
-        # Build the category filter argument; 'all' means no filter (Sonar/Nightly inline run)
-        if ($category -ne 'all') {
-          $args += "--p:testcategory=$category" 
-        }
 
         Write-Host "dotnet $($args -join ' ')"
         & dotnet @args
